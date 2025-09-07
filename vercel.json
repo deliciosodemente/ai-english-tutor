@@ -1,14 +1,5 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "framework": "vite",
-  "installCommand": "npm install",
-  "devCommand": "npm run dev",
-  "env": {
-    "AI_GATEWAY_API_KEY": "@ai_gateway_api_key",
-    "OPENAI_API_KEY": "@openai_api_key",
-    "HUGGINGFACE_API_KEY": "@huggingface_api_key", 
-    "REPLICATE_API_TOKEN": "@replicate_api_token",
-    "GEMINI_API_KEY": "@gemini_api_key"
-  }
+  "framework": "vite"
 }

@@ -168,9 +168,13 @@ export class LocalDatabase {
     await this.syncWithDeAcademy(userId, user, lessonScore, topics);
   }
 
-  // DeAcademy synchronization
+  // DeAcademy synchronization with database
   private async syncWithDeAcademy(userId: string, user: UserProgress, lessonScore: number, topics: string[]): Promise<void> {
     try {
+      // First, save to database
+      await this.saveToDatabase(userId, user, lessonScore, topics);
+
+      // Then sync with DeAcademy
       const progressData = {
         totalLessons: user.totalLessons,
         completedLessons: user.completedLessons,
@@ -206,6 +210,67 @@ export class LocalDatabase {
       }
     } catch (error) {
       console.warn('DeAcademy sync error:', error);
+    }
+  }
+
+  // Save to PostgreSQL database
+  private async saveToDatabase(userId: string, user: UserProgress, lessonScore: number, topics: string[]): Promise<void> {
+    try {
+      // Initialize user if not exists
+      await fetch('/api/init-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          name: user.name,
+          level: user.level
+        })
+      });
+
+      // Add lesson to database
+      await fetch('/api/user-progress', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          lessonData: {
+            date: new Date().toISOString(),
+            level: user.level,
+            duration: 5,
+            topics,
+            score: lessonScore,
+            feedback: 'Good progress!'
+          }
+        })
+      });
+
+      // Update user progress
+      await fetch('/api/user-progress', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          stats: {
+            totalLessons: user.totalLessons,
+            completedLessons: user.completedLessons,
+            currentStreak: user.currentStreak,
+            longestStreak: user.longestStreak,
+            averageScore: user.conversationScore,
+            level: user.level,
+            vocabularyLearned: user.vocabularyLearned
+          }
+        })
+      });
+
+      console.log('Successfully saved to database');
+    } catch (error) {
+      console.warn('Database save error:', error);
     }
   }
 

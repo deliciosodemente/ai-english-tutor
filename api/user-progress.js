@@ -1,7 +1,17 @@
 /**
  * Vercel Serverless Function for User Progress Management
- * Handles user progress, lessons, and statistics
+ * Handles user progress, lessons, and statistics with PostgreSQL
  */
+
+const { 
+  testConnection, 
+  initializeDatabase, 
+  getUser, 
+  upsertUser, 
+  addLesson, 
+  getUserLessons,
+  logSync 
+} = require('./db-connection');
 
 export default async function handler(req, res) {
   // Enable CORS
@@ -44,33 +54,58 @@ async function handleGetProgress(req, res) {
     return res.status(400).json({ error: 'User ID is required' });
   }
 
-  // In a real implementation, you would fetch from a database
-  // For now, we'll return mock data
-  const mockProgress = {
-    userId,
-    totalLessons: 15,
-    completedLessons: 12,
-    currentStreak: 5,
-    longestStreak: 12,
-    averageScore: 8.5,
-    vocabularyLearned: 45,
-    level: 'Intermediate',
-    lastLessonDate: new Date().toISOString(),
-    recentLessons: [
-      {
-        id: '1',
-        date: new Date().toISOString(),
-        level: 'Intermediate',
-        score: 8.5,
-        topics: ['conversation', 'pronunciation']
-      }
-    ]
-  };
+  try {
+    // Test database connection
+    const isConnected = await testConnection();
+    if (!isConnected) {
+      return res.status(500).json({ error: 'Database connection failed' });
+    }
 
-  return res.status(200).json({
-    success: true,
-    data: mockProgress
-  });
+    // Initialize database if needed
+    await initializeDatabase();
+
+    // Get user from database
+    const user = await getUser(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get recent lessons
+    const recentLessons = await getUserLessons(userId, 5);
+
+    const progressData = {
+      userId: user.user_id,
+      name: user.name,
+      level: user.level,
+      totalLessons: user.total_lessons,
+      completedLessons: user.completed_lessons,
+      currentStreak: user.current_streak,
+      longestStreak: user.longest_streak,
+      averageScore: parseFloat(user.conversation_score),
+      vocabularyLearned: user.vocabulary_learned?.length || 0,
+      lastLessonDate: user.last_lesson_date,
+      recentLessons: recentLessons.map(lesson => ({
+        id: lesson.id,
+        date: lesson.date,
+        level: lesson.level,
+        score: parseFloat(lesson.score),
+        topics: lesson.topics || [],
+        duration: lesson.duration
+      }))
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: progressData
+    });
+
+  } catch (error) {
+    console.error('Error getting progress:', error);
+    return res.status(500).json({ 
+      error: 'Failed to get user progress',
+      details: error.message 
+    });
+  }
 }
 
 async function handleCreateProgress(req, res) {
@@ -80,19 +115,49 @@ async function handleCreateProgress(req, res) {
     return res.status(400).json({ error: 'User ID and lesson data are required' });
   }
 
-  // In a real implementation, you would save to a database
-  console.log(`Creating progress for user ${userId}:`, lessonData);
-
-  return res.status(201).json({
-    success: true,
-    message: 'Progress created successfully',
-    data: {
-      id: Date.now().toString(),
-      userId,
-      ...lessonData,
-      createdAt: new Date().toISOString()
+  try {
+    // Test database connection
+    const isConnected = await testConnection();
+    if (!isConnected) {
+      return res.status(500).json({ error: 'Database connection failed' });
     }
-  });
+
+    // Initialize database if needed
+    await initializeDatabase();
+
+    // Add lesson to database
+    const lesson = await addLesson({
+      user_id: userId,
+      date: lessonData.date || new Date().toISOString(),
+      level: lessonData.level,
+      duration: lessonData.duration || 5,
+      topics: lessonData.topics || [],
+      score: lessonData.score,
+      feedback: lessonData.feedback || 'Good progress!',
+      audio_url: lessonData.audio_url
+    });
+
+    if (!lesson) {
+      return res.status(500).json({ error: 'Failed to create lesson' });
+    }
+
+    // Log the activity
+    await logSync(userId, 'lesson_created', 'success', lessonData);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Progress created successfully',
+      data: lesson
+    });
+
+  } catch (error) {
+    console.error('Error creating progress:', error);
+    await logSync(userId, 'lesson_created', 'error', lessonData, error.message);
+    return res.status(500).json({ 
+      error: 'Failed to create progress',
+      details: error.message 
+    });
+  }
 }
 
 async function handleUpdateProgress(req, res) {
@@ -102,16 +167,57 @@ async function handleUpdateProgress(req, res) {
     return res.status(400).json({ error: 'User ID and stats are required' });
   }
 
-  // In a real implementation, you would update the database
-  console.log(`Updating progress for user ${userId}:`, stats);
-
-  return res.status(200).json({
-    success: true,
-    message: 'Progress updated successfully',
-    data: {
-      userId,
-      ...stats,
-      updatedAt: new Date().toISOString()
+  try {
+    // Test database connection
+    const isConnected = await testConnection();
+    if (!isConnected) {
+      return res.status(500).json({ error: 'Database connection failed' });
     }
-  });
+
+    // Initialize database if needed
+    await initializeDatabase();
+
+    // Get current user data
+    const currentUser = await getUser(userId);
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Update user with new stats
+    const updatedUser = await upsertUser({
+      user_id: userId,
+      name: currentUser.name,
+      level: stats.level || currentUser.level,
+      total_lessons: stats.totalLessons || currentUser.total_lessons,
+      completed_lessons: stats.completedLessons || currentUser.completed_lessons,
+      current_streak: stats.currentStreak || currentUser.current_streak,
+      longest_streak: stats.longestStreak || currentUser.longest_streak,
+      last_lesson_date: new Date().toISOString(),
+      vocabulary_learned: stats.vocabularyLearned || currentUser.vocabulary_learned,
+      grammar_points: currentUser.grammar_points,
+      pronunciation_score: stats.pronunciationScore || currentUser.pronunciation_score,
+      conversation_score: stats.averageScore || currentUser.conversation_score
+    });
+
+    if (!updatedUser) {
+      return res.status(500).json({ error: 'Failed to update user progress' });
+    }
+
+    // Log the activity
+    await logSync(userId, 'progress_updated', 'success', stats);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Progress updated successfully',
+      data: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Error updating progress:', error);
+    await logSync(userId, 'progress_updated', 'error', stats, error.message);
+    return res.status(500).json({ 
+      error: 'Failed to update progress',
+      details: error.message 
+    });
+  }
 }

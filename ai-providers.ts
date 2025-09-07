@@ -133,65 +133,6 @@ export class HuggingFaceProvider implements AIProvider {
   }
 }
 
-// Local Ollama Provider
-export class OllamaProvider implements AIProvider {
-  name = 'Ollama (Local)';
-  private baseUrl: string;
-  private model: string;
-
-  constructor(baseUrl: string = 'http://localhost:11434', model: string = 'llama2') {
-    this.baseUrl = baseUrl;
-    this.model = model;
-  }
-
-  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/generate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.model,
-          prompt: systemPrompt ? `${systemPrompt}\n\nUser: ${message}` : message,
-          stream: false,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return {
-        text: data.response || 'No response generated',
-      };
-    } catch (error) {
-      return {
-        text: '',
-        error: `Ollama error: ${error.message}`,
-      };
-    }
-  }
-
-  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
-    return {
-      text: '',
-      error: 'Audio input not supported in this implementation',
-    };
-  }
-
-  async isAvailable(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/api/tags`, {
-        method: 'GET',
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 // Replicate Provider
 export class ReplicateProvider implements AIProvider {
@@ -325,38 +266,6 @@ export class AIGatewayProvider implements AIProvider {
   }
 }
 
-// Mock Provider for testing
-export class MockProvider implements AIProvider {
-  name = 'Mock (Testing)';
-  private responses = [
-    "Hello! I'm your English tutor. How are you today?",
-    "That's great! Let's practice some vocabulary.",
-    "Excellent pronunciation! Keep up the good work.",
-    "Let's try a role-playing exercise. You're at a restaurant.",
-    "Wonderful! Your English is improving every day.",
-  ];
-  private currentIndex = 0;
-
-  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const response = this.responses[this.currentIndex % this.responses.length];
-    this.currentIndex++;
-    
-    return {
-      text: response,
-    };
-  }
-
-  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
-    return this.sendMessage("Audio input received");
-  }
-
-  isAvailable(): boolean {
-    return true;
-  }
-}
 
 // Provider Manager
 export class AIProviderManager {
@@ -368,31 +277,25 @@ export class AIProviderManager {
   }
 
   private initializeProviders() {
-    // Add Mock provider by default
-    this.addProvider('mock', new MockProvider());
-    
-    // Add AI Gateway if API key is available
+    // Add AI Gateway as primary provider
     const aiGatewayKey = process.env.AI_GATEWAY_API_KEY;
     if (aiGatewayKey) {
       this.addProvider('aigateway', new AIGatewayProvider(aiGatewayKey));
     }
     
-    // Add OpenAI if API key is available
+    // Add OpenAI as backup if API key is available
     const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {
       this.addProvider('openai', new OpenAIProvider(openaiKey));
     }
     
-    // Add Hugging Face if API key is available
+    // Add Hugging Face as backup if API key is available
     const hfKey = process.env.HUGGINGFACE_API_KEY;
     if (hfKey) {
       this.addProvider('huggingface', new HuggingFaceProvider(hfKey));
     }
     
-    // Add Ollama (will check availability)
-    this.addProvider('ollama', new OllamaProvider());
-    
-    // Add Replicate if API key is available
+    // Add Replicate as backup if API key is available
     const replicateKey = process.env.REPLICATE_API_TOKEN;
     if (replicateKey) {
       this.addProvider('replicate', new ReplicateProvider(replicateKey));

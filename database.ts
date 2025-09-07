@@ -128,8 +128,8 @@ export class LocalDatabase {
       .slice(0, limit);
   }
 
-  // Progress tracking
-  public updateProgress(userId: string, lessonScore: number, topics: string[]): void {
+  // Progress tracking with DeAcademy sync
+  public async updateProgress(userId: string, lessonScore: number, topics: string[]): Promise<void> {
     const user = this.getUser(userId);
     if (!user) return;
 
@@ -163,6 +163,50 @@ export class LocalDatabase {
     });
 
     this.updateUser(userId, user);
+
+    // Sync with DeAcademy
+    await this.syncWithDeAcademy(userId, user, lessonScore, topics);
+  }
+
+  // DeAcademy synchronization
+  private async syncWithDeAcademy(userId: string, user: UserProgress, lessonScore: number, topics: string[]): Promise<void> {
+    try {
+      const progressData = {
+        totalLessons: user.totalLessons,
+        completedLessons: user.completedLessons,
+        currentStreak: user.currentStreak,
+        averageScore: user.conversationScore,
+        level: user.level,
+        vocabularyLearned: user.vocabularyLearned.length
+      };
+
+      const lessonData = {
+        id: Date.now().toString(),
+        score: lessonScore,
+        topics,
+        duration: 5 // Estimate 5 minutes per lesson
+      };
+
+      const response = await fetch('/api/deacademy-sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          progressData,
+          lessonData
+        })
+      });
+
+      if (response.ok) {
+        console.log('Successfully synced with DeAcademy');
+      } else {
+        console.warn('Failed to sync with DeAcademy:', response.status);
+      }
+    } catch (error) {
+      console.warn('DeAcademy sync error:', error);
+    }
   }
 
   // Statistics

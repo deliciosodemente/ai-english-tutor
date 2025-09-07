@@ -23,7 +23,8 @@ export class GdmLiveAudio extends LitElement {
   @state() currentUser: UserProgress | null = null;
   @state() showStats = false;
   @state() availableProviders: string[] = [];
-  @state() currentProviderName = 'mock';
+  @state() currentProviderName = 'aigateway';
+  @state() deacademySyncStatus = 'disconnected';
 
   private aiManager: AIProviderManager;
   // FIX: Cast window to any to allow for webkitAudioContext for broader browser support.
@@ -210,6 +211,42 @@ export class GdmLiveAudio extends LitElement {
       background: #333;
       color: white;
     }
+
+    .deacademy-sync {
+      position: absolute;
+      top: 10vh;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 20px;
+      font-family: sans-serif;
+      font-size: 12px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .deacademy-sync.connected {
+      background: rgba(76, 175, 80, 0.8);
+    }
+
+    .deacademy-sync.syncing {
+      background: rgba(255, 193, 7, 0.8);
+    }
+
+    .deacademy-sync.error {
+      background: rgba(244, 67, 54, 0.8);
+    }
+
+    .sync-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
   `;
 
   constructor() {
@@ -254,6 +291,11 @@ export class GdmLiveAudio extends LitElement {
     } else {
       this.updateError('Failed to initialize AI provider');
     }
+
+    // Check DeAcademy connection
+    setTimeout(() => {
+      this.checkDeAcademyConnection();
+    }, 2000);
   }
 
   private getSystemInstruction(): string {
@@ -448,10 +490,10 @@ export class GdmLiveAudio extends LitElement {
     setTimeout(async () => {
       await this.sendMessage("I just finished speaking. Please give me feedback on my pronunciation and suggest what to practice next.");
       
-      // Simulate lesson progress
+      // Simulate lesson progress and sync with DeAcademy
       const score = Math.random() * 3 + 7; // Random score between 7-10
       const topics = ['conversation', 'pronunciation', 'vocabulary'];
-      this.recordLessonProgress(score, topics);
+      await this.recordLessonProgress(score, topics);
     }, 1000);
 
     this.updateStatus('Recording stopped. AI is analyzing your speech...');
@@ -480,7 +522,7 @@ export class GdmLiveAudio extends LitElement {
     }
   }
 
-  private recordLessonProgress(score: number, topics: string[]) {
+  private async recordLessonProgress(score: number, topics: string[]) {
     if (!this.currentUser) return;
     
     // Add lesson record
@@ -494,8 +536,8 @@ export class GdmLiveAudio extends LitElement {
       feedback: 'Good progress!'
     });
     
-    // Update user progress
-    this.database.updateProgress(this.currentUser.id, score, topics);
+    // Update user progress and sync with DeAcademy
+    await this.database.updateProgress(this.currentUser.id, score, topics);
     
     // Refresh current user data
     this.currentUser = this.database.getUser(this.currentUser.id);
@@ -539,15 +581,31 @@ export class GdmLiveAudio extends LitElement {
 
     try {
       const systemPrompt = this.getSystemInstruction();
-      const response = await this.aiManager.sendMessage(message, systemPrompt);
       
-      if (response.error) {
-        this.updateError(response.error);
-      } else if (response.text) {
-        this.displayText = response.text;
+      // Use Vercel function for AI chat
+      const response = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          systemPrompt,
+          difficulty: this.difficulty
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success && data.response) {
+        this.displayText = data.response;
         this.updateStatus('AI responded successfully!');
         
-        // Simulate audio response (since most providers don't support audio yet)
+        // Simulate audio response
         this.simulateAudioResponse();
       } else {
         this.updateError('No response received from AI');
@@ -590,6 +648,37 @@ export class GdmLiveAudio extends LitElement {
     }
   }
 
+  private getSyncStatusText(): string {
+    switch (this.deacademySyncStatus) {
+      case 'connected':
+        return 'Connected';
+      case 'syncing':
+        return 'Syncing...';
+      case 'error':
+        return 'Error';
+      default:
+        return 'Disconnected';
+    }
+  }
+
+  private async checkDeAcademyConnection() {
+    if (!this.currentUser) return;
+    
+    try {
+      this.deacademySyncStatus = 'syncing';
+      
+      const response = await fetch(`/api/deacademy-sync?userId=${this.currentUser.id}`);
+      if (response.ok) {
+        this.deacademySyncStatus = 'connected';
+      } else {
+        this.deacademySyncStatus = 'error';
+      }
+    } catch (error) {
+      console.warn('DeAcademy connection check failed:', error);
+      this.deacademySyncStatus = 'error';
+    }
+  }
+
   render() {
     const stats = this.currentUser ? this.database.getUserStats(this.currentUser.id) : null;
     
@@ -606,6 +695,11 @@ export class GdmLiveAudio extends LitElement {
               html`<option value=${provider}>${provider}</option>`
             )}
           </select>
+        </div>
+        
+        <div class="deacademy-sync ${this.deacademySyncStatus}">
+          <div class="sync-indicator"></div>
+          <span>DeAcademy: ${this.getSyncStatusText()}</span>
         </div>
         
         ${this.showStats && stats ? html`

@@ -8,7 +8,7 @@ const { Pool } = require('pg');
 const dbConfig = {
   host: process.env.DB_HOST || 'ls-691c8588ddc925c70345b1fe910345089b0401c1.ck9s044yeolb.us-east-1.rds.amazonaws.com',
   port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'ai_english_tutor',
+  database: process.env.DB_NAME || 'database-1',
   user: process.env.DB_USER || 'dbmasteruser',
   password: process.env.DB_PASSWORD || '_BU9hjwW7eqj&P7A|x+.l?r?wxSCEk,q',
   ssl: {

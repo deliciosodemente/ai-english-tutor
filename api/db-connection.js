@@ -4,13 +4,21 @@
 
 const { Pool } = require('pg');
 
+// Validate required environment variables
+const requiredEnvVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+}
+
 // Database configuration
 const dbConfig = {
-  host: process.env.DB_HOST || 'ls-691c8588ddc925c70345b1fe910345089b0401c1.ck9s044yeolb.us-east-1.rds.amazonaws.com',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'database-1',
-  user: process.env.DB_USER || 'dbmasteruser',
-  password: process.env.DB_PASSWORD || '_BU9hjwW7eqj&P7A|x+.l?r?wxSCEk,q',
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT) || 5432,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
   ssl: {
     rejectUnauthorized: false
   },

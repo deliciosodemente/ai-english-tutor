@@ -12,6 +12,7 @@ import { TranslationManager } from './translation-manager';
 import './visual-3d';
 
 type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
+type TutorMode = 'english' | 'spiritual';
 
 @customElement('gdm-live-audio')
 export class GdmLiveAudio extends LitElement {
@@ -20,6 +21,7 @@ export class GdmLiveAudio extends LitElement {
   @state() error = '';
   @state() private displayText = "Welcome! I'm your AI English tutor. I'll help you practice English conversation. Please select your difficulty level and click the microphone to start speaking.";
   @state() difficulty: Difficulty = 'Beginner';
+  @state() tutorMode: TutorMode = 'english';
   @state() currentUser: UserProgress | null = null;
   @state() deacademySyncStatus = 'disconnected';
   @state() availableProviders: string[] = [];
@@ -128,6 +130,29 @@ export class GdmLiveAudio extends LitElement {
     }
 
     .difficulty-selector button:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .mode-selector button {
+      width: auto;
+      height: auto;
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+
+    .mode-selector button.active {
+      background: rgba(255, 255, 255, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+
+    .mode-selector button:disabled {
       cursor: not-allowed;
       opacity: 0.5;
     }
@@ -299,7 +324,7 @@ export class GdmLiveAudio extends LitElement {
     this.aiManager = new AIProviderManager();
     TranslationManager.loadSavedLanguage();
     this.currentLanguage = TranslationManager.getLanguage();
-    this.displayText = TranslationManager.get('welcome_message');
+    this.displayText = this.getWelcomeMessage();
     this.initUser();
     this.initAudio();
     this.initAI();
@@ -379,7 +404,31 @@ export class GdmLiveAudio extends LitElement {
     }, 2000);
   }
 
+  private getWelcomeMessage(): string {
+    if (this.tutorMode === 'spiritual') {
+      return "Welcome! I'm your AI spiritual tutor. I'll help you explore Krishna consciousness through Srila Prabhupada's teachings. Please select your mode and let's begin our spiritual journey.";
+    }
+    return TranslationManager.get('welcome_message');
+  }
+
   private getSystemInstruction(): string {
+    if (this.tutorMode === 'spiritual') {
+      return `You are a spiritual tutor named 'Gem' teaching Krishna consciousness using Srila Prabhupada's books.
+You MUST always respond with both voice and text when appropriate. Be encouraging, patient, and respectful.
+Always provide clear guidance and maintain ethical boundaries.
+
+Your responses must:
+1. Draw only from authentic Vedic teachings and Srila Prabhupada's books
+2. Be respectful of all spiritual backgrounds and beliefs
+3. Include relevant verses when appropriate
+4. Guide users toward spiritual understanding through education
+5. Focus on love, devotion, and self-realization
+6. Maintain appropriate boundaries - this is educational, not conversion
+7. Include disclaimers when discussing spiritual practices
+
+ALWAYS start by saying: 'Welcome to our spiritual discussion. I am here to share insights from Srila Prabhupada's teachings on Krishna consciousness. What questions do you have about spiritual life, or would you like me to share a verse from the Bhagavad-gita?' Then wait for their response and continue the conversation naturally.`;
+    }
+
     const baseIntro =
       `You are an English teacher named 'Gem'. You MUST always respond with both voice and text. Be encouraging, patient, and helpful. Always provide clear guidance and feedback.`;
 
@@ -595,11 +644,26 @@ export class GdmLiveAudio extends LitElement {
     if (this.isRecording) return;
     this.difficulty = level;
     this.reset();
-    
+
     // Update user level in database
     if (this.currentUser) {
       this.database.updateUser(this.currentUser.id, { level });
       this.currentUser.level = level;
+    }
+  }
+
+  private handleModeChange(mode: TutorMode) {
+    if (this.isRecording) return;
+    this.tutorMode = mode;
+    this.reset();
+
+    // Switch to appropriate AI provider
+    if (mode === 'spiritual') {
+      this.switchProvider('spiritual-tutor');
+    } else {
+      // Default back to aigateway or mock
+      const defaultProvider = this.availableProviders.includes('aigateway') ? 'aigateway' : 'mock';
+      this.switchProvider(defaultProvider);
     }
   }
 
@@ -918,6 +982,22 @@ export class GdmLiveAudio extends LitElement {
         `}
         
         <div class="controls">
+          <div class="mode-selector">
+            <button
+              class=${this.tutorMode === 'english' ? 'active' : ''}
+              @click=${() => this.handleModeChange('english')}
+              ?disabled=${this.isRecording}
+              title="English Learning Mode">
+              📚 English
+            </button>
+            <button
+              class=${this.tutorMode === 'spiritual' ? 'active' : ''}
+              @click=${() => this.handleModeChange('spiritual')}
+              ?disabled=${this.isRecording}
+              title="Spiritual Learning Mode">
+              🙏 Spiritual
+            </button>
+          </div>
           <div class="difficulty-selector">
             <button
               class=${this.difficulty === 'Beginner' ? 'active' : ''}

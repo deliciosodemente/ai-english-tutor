@@ -50,13 +50,19 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
+    // Validate JWT secret
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET environment variable is required');
+    }
+
     // Generate JWT token
     const token = jwt.sign(
-      { 
-        userId: user.user_id, 
-        email: user.email 
+      {
+        userId: user.user_id,
+        email: user.email
       },
-      process.env.JWT_SECRET || 'your-secret-key',
+      jwtSecret,
       { expiresIn: '7d' }
     );
 

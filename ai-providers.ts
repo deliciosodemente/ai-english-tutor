@@ -390,6 +390,98 @@ export class CloudflareWorkersAIProvider implements AIProvider {
 }
 
 
+// Spiritual Tutor Provider
+export class SpiritualTutorProvider implements AIProvider {
+  name = 'Spiritual Tutor';
+  private api: any; // SpiritualAPI instance
+
+  constructor() {
+    // Import spiritual API dynamically to avoid circular dependencies
+    try {
+      const { getSpiritualAPI } = require('./spiritual-api');
+      this.api = getSpiritualAPI();
+    } catch (error) {
+      console.warn('Spiritual API not available:', error);
+    }
+  }
+
+  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
+    try {
+      if (!this.api) {
+        throw new Error('Spiritual API not configured');
+      }
+
+      // Enhanced system prompt for spiritual teaching
+      const spiritualPrompt = `You are a spiritual tutor teaching Krishna consciousness using Srila Prabhupada's books.
+Your responses must:
+1. Draw only from authentic Vedic teachings
+2. Be encouraging and respectful
+3. Include relevant verses when appropriate
+4. Guide users toward spiritual understanding
+5. Maintain ethical boundaries
+6. Focus on education rather than conversion
+
+${systemPrompt || ''}`;
+
+      // Check if the message contains spiritual queries
+      const spiritualKeywords = ['krishna', 'consciousness', 'bhagavad', 'gita', 'spiritual', 'veda', 'prabhupada', 'verse', 'chapter'];
+      const isSpiritualQuery = spiritualKeywords.some(keyword =>
+        message.toLowerCase().includes(keyword)
+      );
+
+      if (isSpiritualQuery) {
+        // Try to find relevant verses
+        try {
+          const searchResults = await this.api.searchVerses(message, 3);
+          if (searchResults.verses.length > 0) {
+            const verse = searchResults.verses[0];
+            const verseText = `"${verse.translation}" (${verse.book} ${verse.chapter}.${verse.verse})`;
+
+            return {
+              text: `Based on Srila Prabhupada's teachings: ${verseText}\n\n${verse.purport ? `Purport: ${verse.purport.substring(0, 200)}...` : ''}\n\nHow does this verse resonate with you?`,
+            };
+          }
+        } catch (apiError) {
+          console.warn('Spiritual API search failed:', apiError);
+        }
+      }
+
+      // Fallback to general spiritual guidance
+      const spiritualResponses = [
+        "In Krishna consciousness, we learn that the soul is eternal and full of knowledge and bliss. How can I help you understand this better?",
+        "Srila Prabhupada teaches us that our real happiness comes from serving Krishna with love and devotion. What questions do you have about devotional service?",
+        "The Bhagavad-gita teaches us about our eternal relationship with Krishna. Would you like me to explain any particular verses?",
+        "Spiritual life is about developing love for Krishna through hearing, chanting, and remembering. What aspect would you like to explore?",
+        "In Vedic wisdom, we understand that we are not these material bodies but eternal spirit souls. This knowledge frees us from material anxieties."
+      ];
+
+      const response = spiritualResponses[Math.floor(Math.random() * spiritualResponses.length)];
+
+      return {
+        text: response,
+      };
+    } catch (error) {
+      console.error('Spiritual tutor error:', error);
+      return {
+        text: 'I apologize, but I\'m currently unable to access the spiritual teachings. Please try again later, or let me know how else I can help you with your spiritual journey.',
+        error: `Spiritual API error: ${error.message}`,
+      };
+    }
+  }
+
+  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
+    // Spiritual tutor doesn't support direct audio input
+    return {
+      text: 'For spiritual discussions, please use text. I\'m here to help you understand Krishna consciousness through sacred teachings.',
+      error: 'Audio input not supported in spiritual tutor mode',
+    };
+  }
+
+  isAvailable(): boolean {
+    return !!this.api;
+  }
+}
+
 // Mock Provider for testing
 export class MockProvider implements AIProvider {
   name = 'Mock (Testing)';
@@ -397,7 +489,7 @@ export class MockProvider implements AIProvider {
   async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
     // Simulate network delay
     await new Promise(resolve => setTimeout(resolve, 1000));
-    
+
     const mockResponses = [
       "Hello! I'm your AI English tutor. Let's practice some conversation. How are you doing today?",
       "Great pronunciation! Keep practicing those vowel sounds. Try saying: 'The quick brown fox jumps over the lazy dog.'",
@@ -405,9 +497,9 @@ export class MockProvider implements AIProvider {
       "I notice you're improving your fluency. Let's have a short conversation about your daily routine. What do you usually do in the morning?",
       "Your confidence is growing! Let's practice some common English expressions. Can you tell me about your weekend plans?"
     ];
-    
+
     const response = mockResponses[Math.floor(Math.random() * mockResponses.length)];
-    
+
     return {
       text: response,
     };
@@ -416,7 +508,7 @@ export class MockProvider implements AIProvider {
   async sendAudio(audioData: Float32Array): Promise<AIResponse> {
     // Mock audio processing
     await new Promise(resolve => setTimeout(resolve, 500));
-    
+
     return {
       text: "I heard your audio! You're doing great with pronunciation. Keep practicing those sounds!",
     };
@@ -439,13 +531,20 @@ export class AIProviderManager {
   private initializeProviders() {
     // Always add Mock provider for testing
     this.addProvider('mock', new MockProvider());
-    
+
+    // Add Spiritual Tutor provider
+    try {
+      this.addProvider('spiritual-tutor', new SpiritualTutorProvider());
+    } catch (error) {
+      console.warn('Spiritual tutor provider not available:', error);
+    }
+
     // Add AI Gateway as primary provider
     const aiGatewayKey = process.env.AI_GATEWAY_API_KEY;
     if (aiGatewayKey) {
       this.addProvider('aigateway', new AIGatewayProvider(aiGatewayKey));
     }
-    
+
     // Add Cloudflare AI Gateway provider
     const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const cfGatewayId = process.env.CLOUDFLARE_GATEWAY_ID;
@@ -453,24 +552,24 @@ export class AIProviderManager {
     if (cfAccountId && cfGatewayId && cfApiToken) {
       this.addProvider('cloudflare-gateway', new CloudflareAIGatewayProvider(cfAccountId, cfGatewayId, cfApiToken));
     }
-    
+
     // Add Cloudflare Workers AI provider
     if (cfAccountId && cfGatewayId && cfApiToken) {
       this.addProvider('cloudflare-workers', new CloudflareWorkersAIProvider(cfAccountId, cfGatewayId, cfApiToken));
     }
-    
+
     // Add OpenAI as backup if API key is available
     const openaiKey = process.env.OPENAI_API_KEY;
     if (openaiKey) {
       this.addProvider('openai', new OpenAIProvider(openaiKey));
     }
-    
+
     // Add Hugging Face as backup if API key is available
     const hfKey = process.env.HUGGINGFACE_API_KEY;
     if (hfKey) {
       this.addProvider('huggingface', new HuggingFaceProvider(hfKey));
     }
-    
+
     // Add Replicate as backup if API key is available
     const replicateKey = process.env.REPLICATE_API_TOKEN;
     if (replicateKey) {

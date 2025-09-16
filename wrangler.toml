@@ -1,0 +1,41 @@
+name = "ai-english-tutor"
+main = "dist/index.html"
+compatibility_date = "2024-01-01"
+
+[env.production]
+name = "ai-english-tutor"
+
+[build]
+command = "npm run build"
+
+[site]
+bucket = "./dist"
+
+# Environment variables for Cloudflare deployment
+[env.production.vars]
+# Cloudflare AI Gateway Configuration
+CLOUDFLARE_ACCOUNT_ID = ""
+CLOUDFLARE_GATEWAY_ID = ""
+CLOUDFLARE_API_TOKEN = ""
+
+# Optional: Other AI providers (fallback)
+OPENAI_API_KEY = ""
+HUGGINGFACE_API_KEY = ""
+REPLICATE_API_TOKEN = ""
+AI_GATEWAY_API_KEY = ""
+
+# KV namespace for storing user progress (optional)
+# [[kv_namespaces]]
+# binding = "USER_PROGRESS"
+# id = "your-kv-namespace-id"
+
+# D1 database for analytics (optional)
+# [[d1_databases]]
+# binding = "ANALYTICS"
+# database_name = "ai-tutor-analytics"
+# database_id = "your-d1-database-id"
+
+# R2 bucket for audio recordings (optional)
+# [[r2_buckets]]
+# binding = "AUDIO_BUCKET"
+# bucket_name = "ai-tutor-audio"

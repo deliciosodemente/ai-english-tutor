@@ -41,12 +41,14 @@ async function initializeDatabase() {
   try {
     const client = await pool.connect();
     
-    // Create users table
+    // Create users table with authentication support
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         user_id VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
         name VARCHAR(255) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
         level VARCHAR(50) NOT NULL DEFAULT 'Beginner',
         total_lessons INTEGER DEFAULT 0,
         completed_lessons INTEGER DEFAULT 0,
@@ -126,42 +128,81 @@ async function getUser(userId) {
   }
 }
 
+// Get user by email
+async function getUserByEmail(email) {
+  try {
+    const client = await pool.connect();
+    const result = await client.query(
+      'SELECT * FROM users WHERE email = $1',
+      [email]
+    );
+    client.release();
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error getting user by email:', error);
+    return null;
+  }
+}
+
 // Create or update user
 async function upsertUser(userData) {
   try {
     const client = await pool.connect();
-    const result = await client.query(`
-      INSERT INTO users (user_id, name, level, total_lessons, completed_lessons, current_streak, longest_streak, last_lesson_date, vocabulary_learned, grammar_points, pronunciation_score, conversation_score)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    
+    // Build query dynamically based on provided fields
+    const fields = [];
+    const values = [];
+    const setClauses = [];
+    let paramCount = 1;
+
+    // Define all possible fields with their parameter positions
+    const fieldMappings = {
+      user_id: { value: userData.user_id, required: true },
+      email: { value: userData.email, required: false },
+      name: { value: userData.name, required: true },
+      password_hash: { value: userData.password_hash, required: false },
+      level: { value: userData.level, required: false },
+      total_lessons: { value: userData.total_lessons, required: false },
+      completed_lessons: { value: userData.completed_lessons, required: false },
+      current_streak: { value: userData.current_streak, required: false },
+      longest_streak: { value: userData.longest_streak, required: false },
+      last_lesson_date: { value: userData.last_lesson_date, required: false },
+      vocabulary_learned: { value: userData.vocabulary_learned, required: false },
+      grammar_points: { value: userData.grammar_points, required: false },
+      pronunciation_score: { value: userData.pronunciation_score, required: false },
+      conversation_score: { value: userData.conversation_score, required: false }
+    };
+
+    // Build INSERT part
+    for (const [field, config] of Object.entries(fieldMappings)) {
+      if (config.value !== undefined) {
+        fields.push(field);
+        values.push(config.value);
+        paramCount++;
+      } else if (config.required) {
+        throw new Error(`Missing required field: ${field}`);
+      }
+    }
+
+    // Build UPDATE part
+    const updateParts = [];
+    for (const [field, config] of Object.entries(fieldMappings)) {
+      if (field !== 'user_id' && config.value !== undefined) {
+        updateParts.push(`${field} = EXCLUDED.${field}`);
+      }
+    }
+    updateParts.push('updated_at = CURRENT_TIMESTAMP');
+
+    const query = `
+      INSERT INTO users (${fields.join(', ')})
+      VALUES (${fields.map((_, i) => `$${i + 1}`).join(', ')})
       ON CONFLICT (user_id) 
       DO UPDATE SET 
-        name = EXCLUDED.name,
-        level = EXCLUDED.level,
-        total_lessons = EXCLUDED.total_lessons,
-        completed_lessons = EXCLUDED.completed_lessons,
-        current_streak = EXCLUDED.current_streak,
-        longest_streak = EXCLUDED.longest_streak,
-        last_lesson_date = EXCLUDED.last_lesson_date,
-        vocabulary_learned = EXCLUDED.vocabulary_learned,
-        grammar_points = EXCLUDED.grammar_points,
-        pronunciation_score = EXCLUDED.pronunciation_score,
-        conversation_score = EXCLUDED.conversation_score,
-        updated_at = CURRENT_TIMESTAMP
+        ${updateParts.join(', ')}
       RETURNING *
-    `, [
-      userData.user_id,
-      userData.name,
-      userData.level,
-      userData.total_lessons,
-      userData.completed_lessons,
-      userData.current_streak,
-      userData.longest_streak,
-      userData.last_lesson_date,
-      userData.vocabulary_learned,
-      userData.grammar_points,
-      userData.pronunciation_score,
-      userData.conversation_score
-    ]);
+    `;
+
+    const result = await client.query(query, values);
     client.release();
     return result.rows[0];
   } catch (error) {
@@ -233,6 +274,7 @@ module.exports = {
   testConnection,
   initializeDatabase,
   getUser,
+  getUserByEmail,
   upsertUser,
   addLesson,
   getUserLessons,

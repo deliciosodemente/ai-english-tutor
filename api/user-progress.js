@@ -13,6 +13,8 @@ const {
   logSync 
 } = require('./db-connection');
 
+const { authenticateToken, getUserIdFromToken } = require('../utils/session');
+
 export default async function handler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -24,17 +26,32 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Authenticate token for all methods except OPTIONS
+  const authResult = authenticateToken(req, res, () => {});
+  if (authResult) {
+    return authResult; // Return error response if authentication failed
+  }
+
   try {
     const { method } = req;
-    const { userId, lessonData, stats } = req.body;
+    const { lessonData, stats } = req.body;
+    
+    // Get user ID from token
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1];
+    const userId = getUserIdFromToken(token);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Invalid authentication token' });
+    }
 
     switch (method) {
       case 'GET':
-        return handleGetProgress(req, res);
+        return handleGetProgress(req, res, userId);
       case 'POST':
-        return handleCreateProgress(req, res);
+        return handleCreateProgress(req, res, userId);
       case 'PUT':
-        return handleUpdateProgress(req, res);
+        return handleUpdateProgress(req, res, userId);
       default:
         return res.status(405).json({ error: 'Method not allowed' });
     }
@@ -47,12 +64,7 @@ export default async function handler(req, res) {
   }
 }
 
-async function handleGetProgress(req, res) {
-  const { userId } = req.query;
-  
-  if (!userId) {
-    return res.status(400).json({ error: 'User ID is required' });
-  }
+async function handleGetProgress(req, res, userId) {
 
   try {
     // Test database connection
@@ -108,11 +120,11 @@ async function handleGetProgress(req, res) {
   }
 }
 
-async function handleCreateProgress(req, res) {
-  const { userId, lessonData } = req.body;
+async function handleCreateProgress(req, res, userId) {
+  const { lessonData } = req.body;
   
-  if (!userId || !lessonData) {
-    return res.status(400).json({ error: 'User ID and lesson data are required' });
+  if (!lessonData) {
+    return res.status(400).json({ error: 'Lesson data is required' });
   }
 
   try {
@@ -160,11 +172,11 @@ async function handleCreateProgress(req, res) {
   }
 }
 
-async function handleUpdateProgress(req, res) {
-  const { userId, stats } = req.body;
+async function handleUpdateProgress(req, res, userId) {
+  const { stats } = req.body;
   
-  if (!userId || !stats) {
-    return res.status(400).json({ error: 'User ID and stats are required' });
+  if (!stats) {
+    return res.status(400).json({ error: 'Stats are required' });
   }
 
   try {

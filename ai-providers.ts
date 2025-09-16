@@ -266,6 +266,166 @@ export class AIGatewayProvider implements AIProvider {
   }
 }
 
+// Cloudflare AI Gateway Provider
+export class CloudflareAIGatewayProvider implements AIProvider {
+  name = 'Cloudflare AI Gateway';
+  private accountId: string;
+  private gatewayId: string;
+  private apiToken: string;
+  private baseUrl: string;
+
+  constructor(accountId: string, gatewayId: string, apiToken: string) {
+    this.accountId = accountId;
+    this.gatewayId = gatewayId;
+    this.apiToken = apiToken;
+    this.baseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}`;
+  }
+
+  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
+    try {
+      // Use Cloudflare's OpenAI-compatible endpoint
+      const response = await fetch(`${this.baseUrl}/openai/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-3.5-turbo',
+          messages: [
+            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+            { role: 'user', content: message }
+          ],
+          max_tokens: 500,
+          temperature: 0.7,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cloudflare AI Gateway error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        text: data.choices[0].message.content,
+      };
+    } catch (error) {
+      return {
+        text: '',
+        error: `Cloudflare AI Gateway error: ${error.message}`,
+      };
+    }
+  }
+
+  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
+    return {
+      text: '',
+      error: 'Audio input not supported in this implementation',
+    };
+  }
+
+  isAvailable(): boolean {
+    return !!(this.accountId && this.gatewayId && this.apiToken);
+  }
+}
+
+// Cloudflare Workers AI Provider
+export class CloudflareWorkersAIProvider implements AIProvider {
+  name = 'Cloudflare Workers AI';
+  private accountId: string;
+  private gatewayId: string;
+  private apiToken: string;
+  private baseUrl: string;
+
+  constructor(accountId: string, gatewayId: string, apiToken: string) {
+    this.accountId = accountId;
+    this.gatewayId = gatewayId;
+    this.apiToken = apiToken;
+    this.baseUrl = `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/workers-ai`;
+  }
+
+  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
+    try {
+      const response = await fetch(`${this.baseUrl}/@cf/meta/llama-3.1-8b-instruct`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [
+            ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+            { role: 'user', content: message }
+          ],
+          stream: false,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Cloudflare Workers AI error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return {
+        text: data.result?.response || data.response || 'No response generated',
+      };
+    } catch (error) {
+      return {
+        text: '',
+        error: `Cloudflare Workers AI error: ${error.message}`,
+      };
+    }
+  }
+
+  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
+    return {
+      text: '',
+      error: 'Audio input not supported in this implementation',
+    };
+  }
+
+  isAvailable(): boolean {
+    return !!(this.accountId && this.gatewayId && this.apiToken);
+  }
+}
+
+
+// Mock Provider for testing
+export class MockProvider implements AIProvider {
+  name = 'Mock (Testing)';
+
+  async sendMessage(message: string, systemPrompt?: string): Promise<AIResponse> {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    const mockResponses = [
+      "Hello! I'm your AI English tutor. Let's practice some conversation. How are you doing today?",
+      "Great pronunciation! Keep practicing those vowel sounds. Try saying: 'The quick brown fox jumps over the lazy dog.'",
+      "Excellent work on your sentence structure. Now let's try a more complex phrase. How would you describe your favorite hobby?",
+      "I notice you're improving your fluency. Let's have a short conversation about your daily routine. What do you usually do in the morning?",
+      "Your confidence is growing! Let's practice some common English expressions. Can you tell me about your weekend plans?"
+    ];
+    
+    const response = mockResponses[Math.floor(Math.random() * mockResponses.length)];
+    
+    return {
+      text: response,
+    };
+  }
+
+  async sendAudio(audioData: Float32Array): Promise<AIResponse> {
+    // Mock audio processing
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    return {
+      text: "I heard your audio! You're doing great with pronunciation. Keep practicing those sounds!",
+    };
+  }
+
+  isAvailable(): boolean {
+    return true; // Always available for testing
+  }
+}
 
 // Provider Manager
 export class AIProviderManager {
@@ -277,10 +437,26 @@ export class AIProviderManager {
   }
 
   private initializeProviders() {
+    // Always add Mock provider for testing
+    this.addProvider('mock', new MockProvider());
+    
     // Add AI Gateway as primary provider
     const aiGatewayKey = process.env.AI_GATEWAY_API_KEY;
     if (aiGatewayKey) {
       this.addProvider('aigateway', new AIGatewayProvider(aiGatewayKey));
+    }
+    
+    // Add Cloudflare AI Gateway provider
+    const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const cfGatewayId = process.env.CLOUDFLARE_GATEWAY_ID;
+    const cfApiToken = process.env.CLOUDFLARE_API_TOKEN;
+    if (cfAccountId && cfGatewayId && cfApiToken) {
+      this.addProvider('cloudflare-gateway', new CloudflareAIGatewayProvider(cfAccountId, cfGatewayId, cfApiToken));
+    }
+    
+    // Add Cloudflare Workers AI provider
+    if (cfAccountId && cfGatewayId && cfApiToken) {
+      this.addProvider('cloudflare-workers', new CloudflareWorkersAIProvider(cfAccountId, cfGatewayId, cfApiToken));
     }
     
     // Add OpenAI as backup if API key is available

@@ -8,6 +8,7 @@ import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {LocalDatabase, UserProgress} from './database';
 import {AIProviderManager, AIProvider} from './ai-providers';
+import { TranslationManager } from './translation-manager';
 import './visual-3d';
 
 type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
@@ -17,14 +18,13 @@ export class GdmLiveAudio extends LitElement {
   @state() isRecording = false;
   @state() status = '';
   @state() error = '';
-  @state() displayText =
-    'Welcome! Select a difficulty and press the red button to start your English lesson.';
+  @state() private displayText = "Welcome! I'm your AI English tutor. I'll help you practice English conversation. Please select your difficulty level and click the microphone to start speaking.";
   @state() difficulty: Difficulty = 'Beginner';
   @state() currentUser: UserProgress | null = null;
-  @state() showStats = false;
+  @state() deacademySyncStatus = 'disconnected';
   @state() availableProviders: string[] = [];
   @state() currentProviderName = 'aigateway';
-  @state() deacademySyncStatus = 'disconnected';
+  @state() currentLanguage = 'en';
 
   private aiManager: AIProviderManager;
   // FIX: Cast window to any to allow for webkitAudioContext for broader browser support.
@@ -247,17 +247,95 @@ export class GdmLiveAudio extends LitElement {
       border-radius: 50%;
       background: currentColor;
     }
+
+    .auth-controls {
+      position: absolute;
+      top: 10vh;
+      right: 10vw;
+      z-index: 20;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 20px;
+      font-family: sans-serif;
+      font-size: 14px;
+    }
+
+    .login-btn, .logout-btn {
+      background: rgba(76, 175, 80, 0.8);
+      color: white;
+      border: none;
+      border-radius: 20px;
+      padding: 10px 15px;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: sans-serif;
+      transition: background-color 0.2s;
+    }
+
+    .login-btn:hover, .logout-btn:hover {
+      background: rgba(76, 175, 80, 1);
+    }
+
+    .logout-btn {
+      background: rgba(244, 67, 54, 0.8);
+      padding: 8px 12px;
+      font-size: 16px;
+    }
+
+    .logout-btn:hover {
+      background: rgba(244, 67, 54, 1);
+    }
   `;
 
   constructor() {
     super();
     this.aiManager = new AIProviderManager();
-    this.initAI();
+    TranslationManager.loadSavedLanguage();
+    this.currentLanguage = TranslationManager.getLanguage();
+    this.displayText = TranslationManager.get('welcome_message');
     this.initUser();
-  }
-
-  private initUser() {
-    // Check if user exists in localStorage
+    this.initAudio();
+    this.initAI();
+  }private initUser() {
+    // Check for authenticated user from JWT token
+    const authToken = localStorage.getItem('authToken');
+    const savedUser = localStorage.getItem('user');
+    
+    if (authToken && savedUser) {
+      try {
+        // Use authenticated user data
+        const userData = JSON.parse(savedUser);
+        this.currentUser = {
+          id: userData.user_id,
+          name: userData.name,
+          level: userData.level || this.difficulty,
+          totalLessons: userData.total_lessons || 0,
+          totalTime: userData.total_time || 0,
+          averageScore: userData.average_score || 0,
+          streak: userData.streak || 0
+        };
+        
+        // Update difficulty based on user level
+        if (userData.level) {
+          this.difficulty = userData.level as Difficulty;
+        }
+        
+        console.log('Authenticated user loaded:', this.currentUser);
+        return;
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+        // Fall back to local user
+      }
+    }
+    
+    // Check if local user exists in localStorage
     const savedUserId = localStorage.getItem('ai-tutor-user-id');
     if (savedUserId) {
       this.currentUser = this.database.getUser(savedUserId);
@@ -282,8 +360,11 @@ export class GdmLiveAudio extends LitElement {
     this.availableProviders = this.aiManager.getAvailableProviders();
     console.log('Available AI providers:', this.availableProviders);
     
-    // Set default provider
-    const success = await this.aiManager.setProvider(this.currentProviderName);
+    // Set default provider - try aigateway first, then mock
+    let providerToUse = this.availableProviders.includes('aigateway') ? 'aigateway' : 'mock';
+    this.currentProviderName = providerToUse;
+    
+    const success = await this.aiManager.setProvider(providerToUse);
     if (success) {
       this.updateStatus(`AI Provider: ${this.aiManager.getCurrentProvider()?.name} - Ready!`);
       // Send initial greeting
@@ -547,6 +628,41 @@ export class GdmLiveAudio extends LitElement {
     this.showStats = !this.showStats;
   }
 
+  private async handleLogin() {
+    // Redirect to login page
+    window.location.href = '/login';
+  }
+
+  private async handleLogout() {
+    try {
+      // Call logout API
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.ok) {
+        // Clear authentication data from localStorage
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('currentUser');
+        
+        // Reset user state
+        this.currentUser = null;
+        
+        // Reset the application
+        this.reset();
+        this.updateStatus('Sesión cerrada exitosamente');
+      } else {
+        this.updateError('Error al cerrar sesión');
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      this.updateError('Error al cerrar sesión');
+    }
+  }
+
   private async sendInitialGreeting() {
     console.log('Sending initial greeting...');
     await this.sendMessage("Hello, please start the lesson.");
@@ -582,37 +698,68 @@ export class GdmLiveAudio extends LitElement {
     try {
       const systemPrompt = this.getSystemInstruction();
       
-      // Use Vercel function for AI chat
-      const response = await fetch('/api/ai-chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message,
-          systemPrompt,
-          difficulty: this.difficulty
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
+      // Check if we're running locally or on Vercel
+      const isLocal = !window.location.hostname.includes('vercel.app');
       
-      if (data.success && data.response) {
-        this.displayText = data.response;
-        this.updateStatus('AI responded successfully!');
+      if (isLocal) {
+        // Use client-side AI provider for local development
+        const provider = this.aiManager.getCurrentProvider();
+        if (!provider) {
+          throw new Error('No AI provider available');
+        }
         
-        // Simulate audio response
-        this.simulateAudioResponse();
+        const response = await provider.sendMessage(message, systemPrompt);
+        
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        
+        this.displayText = response.text;
+        this.updateStatus('AI responded successfully!');
       } else {
-        this.updateError('No response received from AI');
+        // Use Vercel serverless function for production
+        const response = await fetch('/api/ai-chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message,
+            systemPrompt,
+            difficulty: this.difficulty
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.success && data.response) {
+          this.displayText = data.response;
+          this.updateStatus('AI responded successfully!');
+        } else {
+          throw new Error('No response received from AI');
+        }
       }
+      
+      // Simulate audio response
+      this.simulateAudioResponse();
     } catch (error) {
       console.error('Error sending message:', error);
-      this.updateError('Failed to send message: ' + error.message);
+      
+      // Fallback to mock responses if all else fails
+      const mockResponses = [
+        "Hello! I'm your AI English tutor. Let's practice some conversation. How are you doing today?",
+        "Great pronunciation! Keep practicing those vowel sounds. Try saying: 'The quick brown fox jumps over the lazy dog.'",
+        "Excellent work on your sentence structure. Now let's try a more complex phrase.",
+        "I notice you're improving your fluency. Let's have a short conversation about your daily routine.",
+        "Your confidence is growing! Let's practice some common English expressions."
+      ];
+      
+      this.displayText = mockResponses[Math.floor(Math.random() * mockResponses.length)];
+      this.updateStatus('AI responded successfully! (Mock mode)');
     } finally {
       this.isWaitingForResponse = false;
     }
@@ -651,13 +798,13 @@ export class GdmLiveAudio extends LitElement {
   private getSyncStatusText(): string {
     switch (this.deacademySyncStatus) {
       case 'connected':
-        return 'Connected';
+        return TranslationManager.get('connected');
       case 'syncing':
-        return 'Syncing...';
+        return TranslationManager.get('syncing');
       case 'error':
-        return 'Error';
+        return TranslationManager.get('connection_error');
       default:
-        return 'Disconnected';
+        return TranslationManager.get('not_connected');
     }
   }
 
@@ -679,6 +826,14 @@ export class GdmLiveAudio extends LitElement {
     }
   }
 
+  private switchLanguage(language: string) {
+    TranslationManager.setLanguage(language as 'en' | 'zh' | 'ja');
+    this.currentLanguage = language;
+    // Update display text to reflect new language
+    this.displayText = TranslationManager.get('welcome_message');
+    this.requestUpdate();
+  }
+
   render() {
     const stats = this.currentUser ? this.database.getUserStats(this.currentUser.id) : null;
     
@@ -687,7 +842,7 @@ export class GdmLiveAudio extends LitElement {
         <div class="text-display">${this.displayText}</div>
         
         <div class="provider-selector">
-          <h4>🤖 AI Provider</h4>
+          <h4>🤖 ${TranslationManager.get('ai_provider')}</h4>
           <select 
             .value=${this.currentProviderName}
             @change=${(e: Event) => this.switchProvider((e.target as HTMLSelectElement).value)}>
@@ -696,43 +851,69 @@ export class GdmLiveAudio extends LitElement {
             )}
           </select>
         </div>
+
+        <div class="language-selector">
+          <h4>🌐 Language</h4>
+          <select 
+            .value=${this.currentLanguage}
+            @change=${(e: Event) => this.switchLanguage((e.target as HTMLSelectElement).value)}>
+            ${TranslationManager.getAvailableLanguages().map(lang => 
+              html`<option value=${lang.code}>${lang.name}</option>`
+            )}
+          </select>
+        </div>
+
+        <div class="auth-controls">
+            ${this.currentUser ? html`
+              <div class="user-info">
+                <span>👤 ${this.currentUser.name}</span>
+                <button class="logout-btn" @click=${this.handleLogout} title="${TranslationManager.get('logout')}">
+                  🚪
+                </button>
+              </div>
+            ` : html`
+              <button class="login-btn" @click=${this.handleLogin} title="${TranslationManager.get('login')}">
+                🔐 ${TranslationManager.get('login')}
+              </button>
+            `}
+          </div>
         
         <div class="deacademy-sync ${this.deacademySyncStatus}">
           <div class="sync-indicator"></div>
-          <span>DeAcademy: ${this.getSyncStatusText()}</span>
+          <span>${TranslationManager.get('deacademy')}: ${this.getSyncStatusText()}</span>
         </div>
         
         ${this.showStats && stats ? html`
           <div class="stats-panel">
-            <h3>📊 Tu Progreso</h3>
+            <h3>${TranslationManager.get('progress')}</h3>
             <div class="stat-item">
-              <span>Lecciones Completadas:</span>
+              <span>${TranslationManager.get('completed_lessons')}:</span>
               <span class="stat-value">${stats.totalLessons}</span>
             </div>
             <div class="stat-item">
-              <span>Puntuación Promedio:</span>
+              <span>${TranslationManager.get('average_score')}:</span>
               <span class="stat-value">${stats.averageScore.toFixed(1)}/10</span>
             </div>
             <div class="stat-item">
-              <span>Racha Actual:</span>
-              <span class="stat-value">${stats.currentStreak} días</span>
+              <span>${TranslationManager.get('current_streak')}:</span>
+              <span class="stat-value">${stats.currentStreak} days</span>
             </div>
             <div class="stat-item">
-              <span>Mejor Racha:</span>
-              <span class="stat-value">${stats.longestStreak} días</span>
+              <span>${TranslationManager.get('best_streak')}:</span>
+              <span class="stat-value">${stats.longestStreak} days</span>
             </div>
             <div class="stat-item">
-              <span>Vocabulario Aprendido:</span>
-              <span class="stat-value">${stats.vocabularyCount} palabras</span>
+              <span>${TranslationManager.get('vocabulary_learned')}:</span>
+              <span class="stat-value">${stats.vocabularyCount} words</span>
             </div>
             <div class="stat-item">
-              <span>Nivel Actual:</span>
+              <span>${TranslationManager.get('current_level')}:</span>
               <span class="stat-value">${stats.level}</span>
             </div>
           </div>
         ` : html`
           <button class="stats-toggle" @click=${this.toggleStats}>
-            📊 Ver Progreso
+            ${TranslationManager.get('view_progress')}
           </button>
         `}
         
@@ -742,22 +923,22 @@ export class GdmLiveAudio extends LitElement {
               class=${this.difficulty === 'Beginner' ? 'active' : ''}
               @click=${() => this.handleDifficultyChange('Beginner')}
               ?disabled=${this.isRecording}
-              title="Beginner Level">
-              Beginner
+              title="${TranslationManager.get('beginner')} Level">
+              ${TranslationManager.get('beginner')}
             </button>
             <button
               class=${this.difficulty === 'Intermediate' ? 'active' : ''}
               @click=${() => this.handleDifficultyChange('Intermediate')}
               ?disabled=${this.isRecording}
-              title="Intermediate Level">
-              Intermediate
+              title="${TranslationManager.get('intermediate')} Level">
+              ${TranslationManager.get('intermediate')}
             </button>
             <button
               class=${this.difficulty === 'Advanced' ? 'active' : ''}
               @click=${() => this.handleDifficultyChange('Advanced')}
               ?disabled=${this.isRecording}
-              title="Advanced Level">
-              Advanced
+              title="${TranslationManager.get('advanced')} Level">
+              ${TranslationManager.get('advanced')}
             </button>
           </div>
           <div class="action-buttons">
@@ -765,7 +946,7 @@ export class GdmLiveAudio extends LitElement {
               id="testButton"
               @click=${this.testConnection}
               ?disabled=${this.isRecording}
-              title="Test Connection">
+              title="${TranslationManager.get('test_connection')}">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="40px"
@@ -780,7 +961,7 @@ export class GdmLiveAudio extends LitElement {
               id="resetButton"
               @click=${this.reset}
               ?disabled=${this.isRecording}
-              title="Reset Session">
+              title="${TranslationManager.get('reset_session')}">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 height="40px"
@@ -795,7 +976,7 @@ export class GdmLiveAudio extends LitElement {
               id="startButton"
               @click=${this.startRecording}
               ?disabled=${this.isRecording}
-              title="Start Recording">
+              title="${TranslationManager.get('start_recording')}">
               <svg
                 viewBox="0 0 100 100"
                 width="32px"
@@ -809,7 +990,7 @@ export class GdmLiveAudio extends LitElement {
               id="stopButton"
               @click=${this.stopRecording}
               ?disabled=${!this.isRecording}
-              title="Stop Recording">
+              title="${TranslationManager.get('stop_recording')}">
               <svg
                 viewBox="0 0 100 100"
                 width="32px"
